@@ -4,6 +4,10 @@ Cluster class:
 * available_resources: A dictionary that contains the available resources in the cluster.
 * running_jobs: A list of jobs that are currently running in the cluster.
 '''
+import numpy as np
+from Job import Job
+
+
 class Cluster:
     def __init__(self, total_resources):
         # Ex: {'cpu': 100, 'ram': 256}

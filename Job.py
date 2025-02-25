@@ -1,5 +1,5 @@
-BASE_ENERGY_PER_CPU = 0.5  # Energy consumed per unit of CPU per timestep
-BASE_ENERGY_PER_RAM = 0.1  # Energy consumed per unit of RAM per timestep
+BASE_ENERGY_PER_CPU = 0.8  # Energy consumed per unit of CPU per timestep
+BASE_ENERGY_PER_RAM = 0.3  # Energy consumed per unit of RAM per timestep
 
 '''
 Job class: To represent a job in the simulation environment.
@@ -24,6 +24,9 @@ class Job:
         ) * self.duration
         self.start_time = None
         self.finish_time = None
+        self.resource_start_unit = [] # [{'cpu': 3, 'ram': 4}]
+        self.num_green_energy_used = 0
+        self.num_brown_energy_used = 0
         
     def __repr__(self):
         return f"Job(id={self.job_id}, duration={self.duration}, submit_time={self.submit_time:.2f}, energy={self.energy_requirement:.2f})"

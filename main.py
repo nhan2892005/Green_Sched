@@ -1,77 +1,120 @@
 import csv
 import matplotlib.pyplot as plt
+import numpy as np
 from Env import HPCEnv
+from Scheduler import FCFSScheduler, SJFScheduler, RoundRobinScheduler, RLScheduler
 
-# Chạy simulation, ghi log ra CSV và vẽ biểu đồ.
+# Chạy simulation, ghi log ra CSV và vẽ biểu đồ để so sánh các scheduler
 if __name__ == "__main__":
-    env = HPCEnv()
-    obs = env.reset()
-    done = False
-    total_reward = 0
+    # Chạy với nhiều scheduler khác nhau để so sánh
+    schedulers = {
+        "FCFS": FCFSScheduler(),
+        "SJF": SJFScheduler(),
+        "RoundRobin": RoundRobinScheduler(),
+        #"RL": RLScheduler(model_path="rl_scheduler_model")  # Load pre-trained model
+    }
     
-    while not done:
-        # Ở đây sử dụng hành động ngẫu nhiên; sau này có thể thay bằng hành động của mô hình RL.
-        action = env.get_action()
-        obs, reward, done, info = env.step(action)
-        total_reward += reward
-        env.render()
+    # Tắt chế độ training khi đánh giá
+    if "RL" in schedulers:
+        schedulers["RL"].training_mode = False
     
-    print("Total Reward:", total_reward)
+    results = {}
+    all_metrics = {}
     
-    # Ghi log dữ liệu vào file CSV.
-    csv_file = "hpc_simulation_log.csv"
-    fieldnames = ['time', 'free_cpu_ratio', 'job_queue_ratio', 'battery_ratio', 
-                  'running_job_ratio', 'time_norm', 'cpu_usage_ratio', 
-                  'clean_energy_ratio', 'solar_generation', 'wind_generation',
-                  'clean_energy_generation', 'non_clean_energy_used',
-                  'cluster_consumption', 'reward', 'battery_level', 'ram_usage_ratio']
-    with open(csv_file, mode='w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for entry in env.log_data:
-            writer.writerow(entry)
-    print(f"Log dữ liệu đã được ghi ra file: {csv_file}")
+    for scheduler_name, scheduler in schedulers.items():
+        print(f"Running simulation with {scheduler_name} scheduler...")
+        
+        env = HPCEnv()
+        env.scheduler = scheduler  # Gán scheduler cho môi trường
+        obs = env.reset()
+        done = False
+        total_reward = 0
+        
+        while not done:
+            action = env.get_action()  # Action từ scheduler
+            obs, reward, done, info = env.step(action)
+            total_reward += reward
+        
+        print(f"{scheduler_name} - Total Reward: {total_reward}")
+        
+        # Lưu kết quả để so sánh
+        results[scheduler_name] = {
+            "env": env,
+            "total_reward": total_reward,
+            "log_data": env.log_data
+        }
+        
+        # Trích xuất metrics cho việc so sánh
+        if env.log_data:
+            # Brown energy ratio trung bình
+            brown_ratios = [entry['brown_energy_ratio'] for entry in env.log_data]
+            # Số job hoàn thành
+            completed = env.log_data[-1]['completed_jobs'] if env.log_data else 0
+            # Slowdown trung bình
+            slowdowns = [entry['avg_slowdown'] for entry in env.log_data if entry['avg_slowdown'] > 0]
+            avg_slowdown = np.mean(slowdowns) if slowdowns else 0
+            # Resource utilization trung bình
+            cpu_usage = np.mean([entry['cpu_usage_ratio'] for entry in env.log_data])
+            
+            all_metrics[scheduler_name] = {
+                'brown_energy_ratio': np.mean(brown_ratios),
+                'completed_jobs': completed,
+                'avg_slowdown': avg_slowdown,
+                'cpu_usage': cpu_usage,
+                'total_reward': total_reward
+            }
+        
+        # Ghi log dữ liệu vào file CSV
+        csv_file = f"hpc_simulation_log_{scheduler_name}.csv"
+        fieldnames = ['time', 'free_cpu_ratio', 'job_queue_ratio', 'battery_ratio', 
+                    'running_job_ratio', 'time_norm', 'cpu_usage_ratio', 
+                    'clean_energy_ratio', 'solar_generation', 'wind_generation',
+                    'clean_energy_generation', 'non_clean_energy_used',
+                    'cluster_consumption', 'reward', 'battery_level', 'ram_usage_ratio',
+                    'brown_energy_ratio', 'completed_jobs', 'avg_slowdown']
+        
+        with open(csv_file, mode='w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for entry in env.log_data:
+                writer.writerow(entry)
+        
+        print(f"Log data written to: {csv_file}")
+
+    # Vẽ biểu đồ so sánh các metrics
+    metrics = ['brown_energy_ratio', 'completed_jobs', 'avg_slowdown', 'cpu_usage', 'total_reward']
+    scheduler_names = list(all_metrics.keys())
     
-    # Vẽ biểu đồ của các năng lượng và quá trình sử dụng tài nguyên theo thời gian.
-    times = [entry['time'] for entry in env.log_data]
-    solar_levels = [entry['solar_generation'] for entry in env.log_data]
-    wind_levels = [entry['wind_generation'] for entry in env.log_data]
-    clean_energy_levels = [entry['clean_energy_generation'] for entry in env.log_data]
-    non_clean_levels = [entry['non_clean_energy_used'] for entry in env.log_data]
-    cluster_consumptions = [entry['cluster_consumption'] for entry in env.log_data]
-    cpu_usages = [entry['cpu_usage_ratio'] for entry in env.log_data]
-    ram_usages = [entry['ram_usage_ratio'] for entry in env.log_data]
+    plt.figure(figsize=(16, 12))
     
-    plt.figure(figsize=(14, 10))
-    
-    # Biểu đồ năng lượng sạch: năng lượng mặt trời, gió và tổng clean energy.
-    plt.subplot(3, 1, 1)
-    plt.plot(times, solar_levels, marker='o', label='Solar Generation')
-    plt.plot(times, wind_levels, marker='s', label='Wind Generation')
-    plt.plot(times, clean_energy_levels, marker='^', label='Total Clean Energy')
-    plt.ylabel("Clean Energy (units)")
-    plt.title("Clean energy variability")
-    plt.legend()
-    plt.grid(True)
-    
-    # Biểu đồ năng lượng không sạch sử dụng và tiêu thụ của cụm.
-    plt.subplot(3, 1, 2)
-    plt.plot(times, non_clean_levels, marker='o', color='red', label='Non-Clean Energy Used')
-    plt.plot(times, cluster_consumptions, marker='s', color='purple', label='Cluster Consumption')
-    plt.ylabel("Energy Consumption (units)")
-    plt.title("Non-Clean Energy Usage and Cluster Consumption")
-    plt.legend()
-    plt.grid(True)
-    
-    # Biểu đồ quá trình sử dụng resource: CPU usage và RAM usage.
-    plt.subplot(3, 1, 3)
-    plt.plot(times, cpu_usages, marker='o', label='CPU Usage Ratio')
-    plt.plot(times, ram_usages, marker='s', label='RAM Usage Ratio')
-    plt.xlabel("Time (timestep)")
-    plt.ylabel("Usage Ratio")
-    plt.title("Resource Usage Process (CPU & RAM)")
-    plt.legend()
-    plt.grid(True)
+    for i, metric in enumerate(metrics):
+        plt.subplot(3, 2, i+1)
+        values = [all_metrics[s][metric] for s in scheduler_names]
+        bars = plt.bar(scheduler_names, values)
+        
+        # Add values on top of bars
+        for bar, val in zip(bars, values):
+            plt.text(bar.get_x() + bar.get_width()/2, val + 0.05*max(values), 
+                     f'{val:.2f}', ha='center')
+        
+        plt.title(f'Comparison of {metric.replace("_", " ").title()}')
+        plt.xticks(rotation=45)
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
     
     plt.tight_layout()
-    plt.show()
+    plt.savefig('scheduler_comparison.png')
+    
+    # Vẽ biểu đồ cho tỷ lệ năng lượng không xanh theo thời gian
+    plt.figure(figsize=(14, 8))
+    
+    for scheduler_name, result in results.items():
+        times = [entry['time'] for entry in result['log_data']]
+        brown_ratios = [entry['brown_energy_ratio'] for entry in result['log_data']]
+        plt.plot(times, brown_ratios, marker='.', label=scheduler_name)
+    
+    plt.xlabel("Time (timestep)")
+    plt.ylabel("Brown Energy Ratio")
+    plt.title("Non-Green Energy Usage Over Time")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig("brown_energy_comparison.png")

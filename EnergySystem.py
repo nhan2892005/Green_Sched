@@ -26,7 +26,14 @@ class EnergySystem:
         
         # Cập nhật pin: lưu trữ một phần clean energy (hệ số sạc 0.1).
         self.battery_level = min(self.battery_capacity, self.battery_level + clean_energy_generation * 0.1)
-        return clean_energy_generation, solar_generation, wind_generation
+        return clean_energy_generation * 0.9, solar_generation, wind_generation
         
     def get_available_energy(self):
         return self.battery_level
+    
+    def use_battery(self, ratio = 0.2) -> float:
+        amount = self.battery_capacity * ratio
+        amount_less = max(0, self.battery_level - amount)
+        battery_cache = self.battery_level
+        self.battery_level = amount_less
+        return battery_cache - amount_less
