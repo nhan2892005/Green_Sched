@@ -6,7 +6,7 @@ from Job import Job
 
 JOB_QUEUE_SIZE = 64
 NUM_JOB = 256
-TIMESTEP = 100
+TIMESTEP = 300
 
 class HPCEnv(gym.Env):
     def __init__(self):
