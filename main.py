@@ -65,7 +65,7 @@ if __name__ == "__main__":
             }
         
         # Ghi log dữ liệu vào file CSV
-        csv_file = f"hpc_simulation_log_{scheduler_name}.csv"
+        csv_file = f"data/hpc_simulation_log_{scheduler_name}.csv"
         fieldnames = ['time', 'free_cpu_ratio', 'job_queue_ratio', 'battery_ratio', 
                     'running_job_ratio', 'time_norm', 'cpu_usage_ratio', 
                     'clean_energy_ratio', 'solar_generation', 'wind_generation',
@@ -102,7 +102,7 @@ if __name__ == "__main__":
         plt.grid(axis='y', linestyle='--', alpha=0.7)
     
     plt.tight_layout()
-    plt.savefig('scheduler_comparison.png')
+    plt.savefig('data/scheduler_comparison.png')
     
     # Vẽ biểu đồ cho tỷ lệ năng lượng không xanh theo thời gian
     plt.figure(figsize=(14, 8))
@@ -117,4 +117,4 @@ if __name__ == "__main__":
     plt.title("Non-Green Energy Usage Over Time")
     plt.legend()
     plt.grid(True)
-    plt.savefig("brown_energy_comparison.png")
+    plt.savefig("data/brown_energy_comparison.png")
