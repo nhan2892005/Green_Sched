@@ -1,49 +1,235 @@
-from Env import HPCEnv, JOB_QUEUE_SIZE
-from RLBrain import RLPolicyAgent
+import os
+import csv
 import torch
+import numpy as np
+import matplotlib.pyplot as plt
+import torch.nn as nn
+import torch.optim as optim
 
-def train_agent(num_episodes=500):
+from Env import HPCEnv
+from RLBrain import RLPolicyAgent
+from Scheduler import FCFSScheduler, SJFScheduler, RoundRobinScheduler
+
+# -------------------------------
+# RL Scheduler Wrapper (training)
+# -------------------------------
+class RLScheduler:
+    def __init__(self, agent):
+        self.agent = agent
+        self.training_mode = True  # có thể chuyển sang test mode khi cần
+    
+    def select_action(self, state):
+        # Trong training, action được chọn theo phân phối (sample) từ policy network
+        return self.agent.select_action(state)
+
+# -------------------------------
+# RL Scheduler Wrapper (test mode)
+# -------------------------------
+class RLTestScheduler:
+    def __init__(self, agent):
+        self.agent = agent
+        self.training_mode = False
+    def schedule(self, job_queue, cluster, energy_system, current_time, observation):
+        # Ở chế độ test, chọn action theo argmax (greedy)
+        state_tensor = torch.from_numpy(observation).float()
+        with torch.no_grad():
+            probs = self.agent.policy_net(state_tensor)
+        return torch.argmax(probs).item()
+
+# -------------------------------
+# Main: Training, Testing & Analysis
+# -------------------------------
+if __name__ == "__main__":
+    # Tạo các thư mục cần thiết để lưu weights và dữ liệu
+    os.makedirs("weights", exist_ok=True)
+    os.makedirs("data", exist_ok=True)
+    
+    # -------------------------------
+    # Huấn luyện RL Scheduler
+    # -------------------------------
+    num_training_episodes = 1024
+    save_interval = 32
     env = HPCEnv()
     input_dim = env.observation_space.shape[0]  # 524 features
-    output_dim = JOB_QUEUE_SIZE  # 64 actions
-    agent = RLPolicyAgent(input_dim, output_dim)
+    output_dim = env.action_space.n             # JOB_QUEUE_SIZE (64)
     
-    for episode in range(num_episodes):
+    rl_agent = RLPolicyAgent(input_dim, output_dim)
+    # Trong quá trình training, chúng ta sẽ gọi trực tiếp rl_agent.select_action(state)
+    env.scheduler = None  # không dùng scheduler.schedule() trong training loop
+    
+    training_rewards = []
+    for episode in range(1, num_training_episodes + 1):
         state = env.reset()
         episode_reward = 0
         done = False
         while not done:
-            action = agent.select_action(state)
+            action = rl_agent.select_action(state)
             next_state, reward, done, _ = env.step(action)
-            agent.rewards.append(reward)
+            rl_agent.rewards.append(reward)
             episode_reward += reward
             state = next_state
-        agent.finish_episode()
-        print(f"Episode {episode+1} Reward: {episode_reward:.2f}")
-    return agent
-
-def test_agent(agent, num_episodes=10):
-    env = HPCEnv()
-    for episode in range(num_episodes):
+        rl_agent.finish_episode()
+        training_rewards.append(episode_reward)
+        print(f"Training Episode {episode}, Reward: {episode_reward:.2f}")
+        
+        # Lưu weight mỗi 32 episode
+        if episode % save_interval == 0:
+            weight_path = f"weights/rl_policy_episode_{episode}.pth"
+            torch.save(rl_agent.policy_net.state_dict(), weight_path)
+            print(f"Saved weights to {weight_path}")
+    
+    # Vẽ learning curve (reward theo episode)
+    plt.figure(figsize=(10,6))
+    plt.plot(range(1, num_training_episodes + 1), training_rewards, label="Training Reward", color='b')
+    plt.xlabel("Episode")
+    plt.ylabel("Total Reward")
+    plt.title("Learning Curve for RL Scheduler")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig("data/learning_curve.png")
+    plt.show()
+    
+    # -------------------------------
+    # So sánh RL với các Scheduler khác
+    # -------------------------------
+    # Định nghĩa RL test scheduler dùng policy network đã được huấn luyện (mode greedy)
+    rl_test_scheduler = RLTestScheduler(rl_agent)
+    
+    # Khai báo các scheduler để so sánh
+    schedulers = {
+        "FCFS": FCFSScheduler(),
+        "SJF": SJFScheduler(),
+        "RoundRobin": RoundRobinScheduler(),
+        "RL": rl_test_scheduler
+    }
+    
+    results = {}    # lưu kết quả simulation cho từng scheduler
+    all_metrics = {}  # lưu các metric so sánh
+    
+    for scheduler_name, scheduler in schedulers.items():
+        print(f"\nRunning simulation with {scheduler_name} scheduler...")
+        env = HPCEnv()
+        # Gán scheduler cho môi trường
+        env.scheduler = scheduler
         state = env.reset()
-        episode_reward = 0
         done = False
+        total_reward = 0
         while not done:
-            state_tensor = torch.from_numpy(state).float()
-            with torch.no_grad():
-                action_probs = agent.policy_net(state_tensor)
-            # Chọn hành động theo argmax
-            action = torch.argmax(action_probs).item()
-            next_state, reward, done, _ = env.step(action)
-            episode_reward += reward
-            state = next_state
-        print(f"Test Episode {episode+1} Reward: {episode_reward:.2f}")
-
-# ---------------------------
-# Chạy huấn luyện và test
-# ---------------------------
-
-if __name__ == "__main__":
-    trained_agent = train_agent(num_episodes=300)
-    print("\nTesting agent after training:")
-    test_agent(trained_agent, num_episodes=5)
+            if scheduler_name == "RL":
+                # Với RL, dùng hàm schedule của RLTestScheduler (cần truyền observation)
+                action = scheduler.schedule(env.job_queue, env.cluster, env.energy_system, env.time, state)
+            else:
+                # Các scheduler truyền thống dùng hàm schedule() của chúng
+                action = scheduler.schedule(env.job_queue, env.cluster, env.energy_system, env.time)
+            state, reward, done, _ = env.step(action)
+            total_reward += reward
+        print(f"{scheduler_name} - Total Reward: {total_reward:.2f}")
+        results[scheduler_name] = {
+            "env": env,
+            "total_reward": total_reward,
+            "log_data": env.log_data
+        }
+        
+        # Trích xuất các metric từ log_data của simulation
+        if env.log_data:
+            brown_ratios = [entry['brown_energy_ratio'] for entry in env.log_data]
+            completed = env.log_data[-1]['completed_jobs'] if env.log_data else 0
+            slowdowns = [entry['avg_slowdown'] for entry in env.log_data if entry['avg_slowdown'] > 0]
+            avg_slowdown = np.mean(slowdowns) if slowdowns else 0
+            cpu_usage = np.mean([entry['cpu_usage_ratio'] for entry in env.log_data])
+            all_metrics[scheduler_name] = {
+                'brown_energy_ratio': np.mean(brown_ratios),
+                'completed_jobs': completed,
+                'avg_slowdown': avg_slowdown,
+                'cpu_usage': cpu_usage,
+                'total_reward': total_reward
+            }
+        
+        # Ghi log dữ liệu của simulation vào file CSV
+        csv_file = f"data/hpc_simulation_log_{scheduler_name}.csv"
+        fieldnames = ['time', 'free_cpu_ratio', 'job_queue_ratio', 'battery_ratio', 
+                      'running_job_ratio', 'time_norm', 'cpu_usage_ratio', 
+                      'clean_energy_ratio', 'solar_generation', 'wind_generation',
+                      'clean_energy_generation', 'non_clean_energy_used',
+                      'cluster_consumption', 'reward', 'battery_level', 'ram_usage_ratio',
+                      'brown_energy_ratio', 'completed_jobs', 'avg_slowdown']
+        with open(csv_file, mode='w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for entry in env.log_data:
+                writer.writerow(entry)
+        print(f"Log data written to: {csv_file}")
+    
+    # -------------------------------
+    # Vẽ biểu đồ so sánh các metric giữa các Scheduler
+    # -------------------------------
+    # Biểu đồ cột so sánh tổng quan các metric
+    metrics = ['brown_energy_ratio', 'completed_jobs', 'avg_slowdown', 'cpu_usage', 'total_reward']
+    scheduler_names = list(all_metrics.keys())
+    
+    plt.figure(figsize=(16, 12))
+    for i, metric in enumerate(metrics):
+        plt.subplot(3, 2, i+1)
+        values = [all_metrics[s][metric] for s in scheduler_names]
+        bars = plt.bar(scheduler_names, values, color=['#4daf4a','#377eb8','#ff7f00','#e41a1c'])
+        for bar, val in zip(bars, values):
+            plt.text(bar.get_x() + bar.get_width()/2, val + 0.05*max(values), f'{val:.2f}', ha='center', fontsize=10)
+        plt.title(f'Comparison of {metric.replace("_", " ").title()}', fontsize=12)
+        plt.xticks(rotation=45)
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.savefig('data/scheduler_comparison.png')
+    plt.show()
+    
+    # Biểu đồ đường cho tỷ lệ năng lượng không xanh theo thời gian
+    plt.figure(figsize=(14, 8))
+    for scheduler_name, result in results.items():
+        times = [entry['time'] for entry in result['log_data']]
+        brown_ratios = [entry['brown_energy_ratio'] for entry in result['log_data']]
+        plt.plot(times, brown_ratios, marker='.', label=scheduler_name)
+    plt.xlabel("Time (timestep)", fontsize=12)
+    plt.ylabel("Brown Energy Ratio", fontsize=12)
+    plt.title("Non-Green Energy Usage Over Time", fontsize=14)
+    plt.legend()
+    plt.grid(True)
+    plt.savefig("data/brown_energy_comparison.png")
+    plt.show()
+    
+    # -------------------------------
+    # Boxplot Analysis cho báo cáo
+    # -------------------------------
+    # Các metric phân tích: Brown Energy Ratio, Average Slowdown, CPU Usage Ratio, Step Reward
+    metrics_to_plot = {
+        "Brown Energy Ratio": "brown_energy_ratio",
+        "Average Slowdown": "avg_slowdown",
+        "CPU Usage Ratio": "cpu_usage_ratio",
+        "Step Reward": "reward"
+    }
+    
+    num_metrics = len(metrics_to_plot)
+    fig, axes = plt.subplots(1, num_metrics, figsize=(5 * num_metrics, 6), sharey=False)
+    
+    for i, (metric_label, metric_key) in enumerate(metrics_to_plot.items()):
+        data = []    # danh sách các giá trị cho mỗi scheduler
+        labels = []  # tên của scheduler
+        for scheduler_name, result in results.items():
+            metric_values = [entry[metric_key] for entry in result['log_data'] if metric_key in entry]
+            data.append(metric_values)
+            labels.append(scheduler_name)
+        axes[i].boxplot(data, labels=labels, showmeans=True)
+        axes[i].set_title(metric_label, fontsize=12)
+        axes[i].set_xlabel("Scheduler", fontsize=10)
+        axes[i].grid(axis="y", linestyle="--", alpha=0.7)
+        # Đặt nhãn trục y dựa trên metric
+        if metric_label == "Step Reward":
+            axes[i].set_ylabel("Reward", fontsize=10)
+        elif metric_label == "CPU Usage Ratio":
+            axes[i].set_ylabel("CPU Usage Ratio", fontsize=10)
+        elif metric_label == "Brown Energy Ratio":
+            axes[i].set_ylabel("Brown Energy Ratio", fontsize=10)
+        elif metric_label == "Average Slowdown":
+            axes[i].set_ylabel("Slowdown", fontsize=10)
+    
+    plt.tight_layout()
+    plt.savefig("data/boxplot_analysis.png")
+    plt.show()

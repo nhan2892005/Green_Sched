@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.distributions import Categorical
+
+# --- Policy Network & RL Agent (REINFORCE) ---
 class PolicyNetwork(nn.Module):
     def __init__(self, input_dim, output_dim, hidden_dim=256):
         super(PolicyNetwork, self).__init__()
@@ -26,8 +27,8 @@ class RLPolicyAgent:
     
     def select_action(self, state):
         state = torch.from_numpy(state).float()
-        action_probs = self.policy_net(state)
-        m = Categorical(action_probs)
+        probs = self.policy_net(state)
+        m = torch.distributions.Categorical(probs)
         action = m.sample()
         self.log_probs.append(m.log_prob(action))
         return action.item()
