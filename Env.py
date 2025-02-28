@@ -118,11 +118,11 @@ class HPCEnv(gym.Env):
         self.last_solar = solar_gen
         self.last_wind = wind_gen
 
-        # Cập nhật trạng thái cụm, giải phóng các job đã hoàn thành
+        # Cập nhật trạng thái cụm: giải phóng các job đã hoàn thành
         finished_jobs = self.cluster.update(self.time)
         self.last_cluster_consumption = sum(job.energy_requirement for job in self.cluster.running_jobs)
 
-        # Nếu năng lượng sạch không đủ (dưới 20% tiêu thụ của cluster), dùng thêm từ pin
+        # Nếu clean energy không đủ (dưới 20% tiêu thụ của cluster), dùng thêm từ pin
         if clean_energy < self.last_cluster_consumption * 0.2:
             clean_energy += self.energy_system.use_battery()
 
@@ -140,26 +140,28 @@ class HPCEnv(gym.Env):
             else:
                 reward -= 1  # phạt nếu chọn job không hợp lệ
 
-        # Tính toán reward dựa trên các thành phần:
-        if self.last_cluster_consumption > 0:
-            clean_ratio = min(clean_energy / self.last_cluster_consumption, 1.0)
-            energy_reward = clean_ratio * 10 - (1 - clean_ratio) * 10
-        else:
-            energy_reward = 0
-
-        job_completion_reward = len(finished_jobs) * 2
-
-        slowdown_penalty = 0
-        threshold = 1.0
+        # Tính toán average job slowdown cho các job đã hoàn thành
+        slowdown_list = []
+        threshold = 1.0  # tránh chia cho số quá nhỏ
         for job in finished_jobs:
             wait_time = job.start_time - job.submit_time
             run_time = job.finish_time - job.start_time
             slowdown = (wait_time + run_time) / max(run_time, threshold)
-            slowdown_penalty += slowdown * 1.0
+            slowdown_list.append(slowdown)
+        avg_slowdown = np.mean(slowdown_list) if slowdown_list else 0
 
-        utilization_reward = self.cluster.get_cpu_usage_ratio() * 3
+        # Tính % brown energy usage
+        if self.last_cluster_consumption > 0:
+            brown_pct = self.last_non_clean_energy / self.last_cluster_consumption
+        else:
+            brown_pct = 0
 
-        reward = energy_reward + job_completion_reward - slowdown_penalty + utilization_reward
+        # Sử dụng các hệ số trọng số để điều chỉnh ảnh hưởng của mỗi thành phần
+        w1 = 1.0
+        w2 = 10.0
+
+        # Reward: hệ thống được thưởng khi slowdown và % brown energy thấp
+        reward = - (w1 * avg_slowdown + w2 * brown_pct)
 
         self.time += 1
         if self.time >= self.simulation_length:
@@ -167,7 +169,7 @@ class HPCEnv(gym.Env):
 
         observation = self._get_observation()
 
-        # Log theo định dạng yêu cầu
+        # Lưu log dữ liệu
         log_entry = {
             'time': self.time,
             'free_cpu_ratio': 1 - self.cluster.get_cpu_usage_ratio(),
@@ -176,7 +178,7 @@ class HPCEnv(gym.Env):
             'running_job_ratio': len(self.cluster.running_jobs) / JOB_QUEUE_SIZE,
             'time_norm': self.time / self.simulation_length,
             'cpu_usage_ratio': self.cluster.get_cpu_usage_ratio(),
-            'clean_energy_ratio': clean_ratio if self.last_cluster_consumption > 0 else 1.0,
+            'clean_energy_ratio': min(clean_energy / self.last_cluster_consumption, 1.0) if self.last_cluster_consumption > 0 else 1.0,
             'solar_generation': solar_gen,
             'wind_generation': wind_gen,
             'clean_energy_generation': clean_energy,
@@ -185,9 +187,9 @@ class HPCEnv(gym.Env):
             'reward': reward,
             'battery_level': self.energy_system.battery_level,
             'ram_usage_ratio': self.cluster.get_ram_usage_ratio(),
-            'brown_energy_ratio': non_clean_used / self.last_cluster_consumption if self.last_cluster_consumption > 0 else 0,
+            'brown_energy_ratio': brown_pct,
             'completed_jobs': len(finished_jobs),
-            'avg_slowdown': slowdown_penalty / len(finished_jobs) if finished_jobs else 0
+            'avg_slowdown': avg_slowdown
         }
         self.log_data.append(log_entry)
 
