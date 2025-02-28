@@ -117,12 +117,13 @@ for scheduler_name, scheduler in schedulers.items():
 # -------------------------------
 # Vẽ biểu đồ so sánh các metric giữa các Scheduler
 # -------------------------------
-metrics = ['brown_energy_ratio', 'completed_jobs', 'avg_slowdown', 'cpu_usage', 'total_reward']
+# metrics = ['brown_energy_ratio', 'completed_jobs', 'avg_slowdown', 'cpu_usage', 'total_reward']
+metrics = ['brown_energy_ratio', 'avg_slowdown', 'cpu_usage', 'total_reward']
 scheduler_names = list(all_metrics.keys())
 
-plt.figure(figsize=(16, 12))
+plt.figure(figsize=(16, 16))
 for i, metric in enumerate(metrics):
-    plt.subplot(3, 2, i+1)
+    plt.subplot(2, 2, i+1)
     values = [all_metrics[s][metric] for s in scheduler_names]
     bars = plt.bar(scheduler_names, values, color=['#4daf4a','#377eb8','#ff7f00','#e41a1c'])
     for bar, val in zip(bars, values):
