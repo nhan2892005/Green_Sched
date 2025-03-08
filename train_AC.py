@@ -22,7 +22,7 @@ save_interval = 32
 os.makedirs("weights", exist_ok=True)
 os.makedirs("data", exist_ok=True)
 
-env = HPCEnv()
+env = HPCEnv(train=True)
 input_dim = env.observation_space.shape[0]  # ví dụ 524
 output_dim = env.action_space.n             # ví dụ 64
 

@@ -9,7 +9,7 @@ NUM_JOB = 256
 TIMESTEP = 300
 
 class HPCEnv(gym.Env):
-    def __init__(self):
+    def __init__(self, train=False):
         super(HPCEnv, self).__init__()
         self.action_space = gym.spaces.Discrete(JOB_QUEUE_SIZE)
         # Observation gồm:
@@ -22,7 +22,8 @@ class HPCEnv(gym.Env):
         
         self.simulation_length = TIMESTEP
         self.cluster = Cluster(total_resources={'cpu': 200, 'ram': 256})
-        self.energy_system = EnergySystem(solar_capacity=120, wind_capacity=600, battery_capacity=100)
+        self.train = train
+        self.energy_system = EnergySystem(solar_capacity=240, wind_capacity=480, battery_capacity=100, time_step=self.simulation_length, train=self.train)
         self.time = 0
         self.job_queue = []
         self.back_log = []
@@ -196,7 +197,7 @@ class HPCEnv(gym.Env):
     def reset(self):
         self.time = 0
         self.cluster = Cluster(total_resources={'cpu': 200, 'ram': 256})
-        self.energy_system = EnergySystem(solar_capacity=120, wind_capacity=600, battery_capacity=100)
+        self.energy_system = EnergySystem(solar_capacity=240, wind_capacity=480, battery_capacity=100, time_step=self.simulation_length, train=self.train)
         self.job_queue = []
         self.back_log = []
         self.generate_jobs()
